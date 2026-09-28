@@ -12,6 +12,7 @@ from talksh.audio import audio_available, record
 from talksh.config import Config
 from talksh.executor import confirm_and_run, is_blocked
 from talksh.llm import resolve_command
+from talksh.mapper import suggest
 from talksh.stt import transcribe
 
 console = Console()
@@ -125,10 +126,20 @@ def run_once(cfg: Config, args: argparse.Namespace) -> int:
     if not transcript:
         console.print("[yellow]Heard nothing. Try again, a little louder.[/yellow]")
         return 1
+    if stt_conf < 0.5:
+        console.print(
+            "[yellow]Low transcription confidence. Speak a little closer to the mic, "
+            'or set model: "small" (or "medium") in ~/.talksh.yaml for better accuracy.[/yellow]'
+        )
 
     match, via = resolve_command(transcript, cfg, no_llm=args.no_llm)
     if match is None:
         console.print("[yellow]Could not map that to a command. Try rephrasing.[/yellow]")
+        hints = suggest(transcript, cfg.aliases)
+        if hints:
+            console.print("[dim]Did you mean:[/dim]")
+            for hint in hints:
+                console.print(f"  [dim]{hint}[/dim]")
         return 1
     via_note = {"llm": "via LLM", "local": "via local mapper"}.get(via, match.source)
     console.print(

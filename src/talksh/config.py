@@ -36,7 +36,10 @@ class LLMSettings:
 @dataclass
 class Config:
     hotkey: str = "ctrl+alt+v"
-    model: str = "base"  # tiny, base, small, medium, large-v3 (faster-whisper)
+    # tiny, base, small, medium, large-v3 (faster-whisper). small is the
+    # sweet spot: much better with accents than base, still fast on CPU.
+    # Set language to "auto" for non-English or mixed speech.
+    model: str = "small"
     language: str = "en"
     confirm_destructive: bool = True
     aliases: dict[str, str] = field(default_factory=dict)

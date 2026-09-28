@@ -56,6 +56,40 @@ talksh --no-llm
 talksh --demo
 ```
 
+## Transcription accuracy
+
+talksh uses faster-whisper, fully offline. The model size is the biggest
+accuracy lever:
+
+| model | size | speed | accuracy |
+| --- | --- | --- | --- |
+| tiny | 39 MB | fastest | rough |
+| base | 74 MB | fast | okay for clear native speech |
+| small | 244 MB | good | **default**, much better with accents |
+| medium | 769 MB | slower | best on CPU |
+| large-v3 | 1550 MB | slowest | overkill for commands |
+
+Set it in `~/.talksh.yaml`:
+
+```yaml
+model: "small"   # or "medium" if small still mishears you
+```
+
+More tips:
+
+- **Record longer.** The default 5 seconds can clip slow starters.
+  `talksh --seconds 8` gives you room to breathe.
+- **Watch the confidence number.** Below ~0.5, the model itself is unsure.
+  Get closer to the mic and reduce background noise.
+- **Not English?** Set `language: "ur"` (or any of the ~99 supported
+  languages), or `language: "auto"` to detect it per recording.
+- The `HF_TOKEN` warning on first run is harmless. It only affects model
+  download rate limits; transcription itself is fully local.
+- Matching is forgiving about singular/plural ("test" vs "tests") and
+  letter case, and filenames, hostnames, and commit messages keep their
+  original text. If nothing matches, talksh suggests the closest known
+  phrases instead of guessing.
+
 ## LLM command generation (optional)
 
 Add an API key and talksh can turn any spoken request into a command, even ones the local mapper has never seen. It talks to any OpenAI-compatible chat completions endpoint, so local servers work too.
@@ -90,7 +124,7 @@ talksh reads `~/.talksh.yaml`. Add your own phrases:
 ```yaml
 # ~/.talksh.yaml
 hotkey: "ctrl+alt+v"
-model: "base"          # tiny, base, small, medium, large-v3
+model: "small"         # tiny, base, small, medium, large-v3 (default: small)
 language: "en"
 confirm_destructive: true
 

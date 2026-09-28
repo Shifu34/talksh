@@ -31,16 +31,27 @@ def _load_model(model_name: str = "base"):
 
 def transcribe(
     audio: np.ndarray,
-    model_name: str = "base",
-    language: str = "en",
+    model_name: str = "small",
+    language: str | None = "en",
 ) -> tuple[str, float]:
     """Transcribe float32 mono audio at 16kHz.
 
     Returns (text, confidence). Confidence is the average logprob-based
     score mapped to 0..1; treat it as relative, not absolute.
+
+    language="auto" (or None) lets the model detect the language instead
+    of assuming English.
     """
     model = _load_model(model_name)
-    segments, info = model.transcribe(audio, language=language, beam_size=5)
+    segments, info = model.transcribe(
+        audio,
+        language=None if language in (None, "auto") else language,
+        beam_size=5,
+        # Skip silence: avoids hallucinating words like "you" over pauses
+        # and keeps the model focused on actual speech.
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+    )
     texts: list[str] = []
     probs: list[float] = []
     for seg in segments:

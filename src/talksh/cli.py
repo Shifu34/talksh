@@ -127,10 +127,11 @@ def run_once(cfg: Config, args: argparse.Namespace) -> int:
         console.print("[yellow]Heard nothing. Try again, a little louder.[/yellow]")
         return 1
     if stt_conf < 0.5:
-        console.print(
-            "[yellow]Low transcription confidence. Speak a little closer to the mic, "
-            'or set model: "small" (or "medium") in ~/.talksh.yaml for better accuracy.[/yellow]'
-        )
+        if model in ("tiny", "base"):
+            model_hint = 'set model: "small" (or "medium") in ~/.talksh.yaml for better accuracy.'
+        else:
+            model_hint = 'try model: "medium" in ~/.talksh.yaml, or speak closer to the mic.'
+        console.print(f"[yellow]Low transcription confidence. {model_hint}[/yellow]")
 
     match, via = resolve_command(transcript, cfg, no_llm=args.no_llm)
     if match is None:

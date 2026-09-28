@@ -28,11 +28,28 @@ class Match:
 # Each builtin is (compiled pattern, command builder, base confidence).
 # Builders receive the regex match object.
 _BUILTINS: list[tuple[re.Pattern, object, float]] = []
+# Unanchored versions of the same patterns, for finding an intent buried
+# in a longer sentence ("could you show me git status"). Core first,
+# then the phrase table most-specific-first.
+_SEARCHABLE: list[tuple[re.Pattern, object, float]] = []
+
+
+def _unanchored(pattern_src: str) -> str:
+    r"""Strip the ^\W* ... \W*$ anchors so the pattern can search."""
+    s = pattern_src
+    if s.startswith(r"^\W*"):
+        s = s[len(r"^\W*") :]
+    if s.endswith(r"\W*$"):
+        s = s[: -len(r"\W*$")]
+    return s
 
 
 def _builtin(pattern: str, confidence: float = 0.9):
     def deco(fn):
         _BUILTINS.append((re.compile(pattern, re.IGNORECASE), fn, confidence))
+        _SEARCHABLE.append(
+            (re.compile(_unanchored(pattern), re.IGNORECASE), fn, confidence)
+        )
         return fn
 
     return deco
@@ -49,12 +66,12 @@ def _run_tests(m: re.Match) -> str:
     return f"pytest {path} -v"
 
 
-@_builtin(r"^\\W*git status\\W*$", 0.98)
+@_builtin(r"^\W*git status\W*$", 0.98)
 def _git_status(m: re.Match) -> str:
     return "git status"
 
 
-@_builtin(r"^\\W*(?:commit|commit changes?)(?: with message (.+?))?\\W*$", 0.9)
+@_builtin(r"^\W*(?:commit|commit changes?)(?: with message (.+?))?\W*$", 0.9)
 def _git_commit(m: re.Match) -> str:
     msg = (m.group(1) or "").strip().strip("\"'")
     if msg:
@@ -62,17 +79,17 @@ def _git_commit(m: re.Match) -> str:
     return "git commit"
 
 
-@_builtin(r"^\\W*(?:start|run)(?: the)? servers?\\W*$", 0.85)
+@_builtin(r"^\W*(?:start|run)(?: the)? servers?\W*$", 0.85)
 def _run_server(m: re.Match) -> str:
     return "python -m http.server"
 
 
-@_builtin(r"^\\W*docker compose up\\W*$", 0.95)
+@_builtin(r"^\W*docker compose up\W*$", 0.95)
 def _compose_up(m: re.Match) -> str:
     return "docker compose up -d"
 
 
-@_builtin(r"^\\W*list files?\\W*$", 0.95)
+@_builtin(r"^\W*list files?\W*$", 0.95)
 def _list_files(m: re.Match) -> str:
     return "ls -la"
 
@@ -145,10 +162,8 @@ def _compile_literal(text: str) -> str:
     )
 
 
-def compile_phrase(phrase: str) -> re.Pattern:
-    """Compile a phrase template like "commit with message {message}" into a
-    case-insensitive regex. {slot} captures free text; literal words match
-    singular or plural, and leading/trailing punctuation is ignored."""
+def _phrase_inner(phrase: str) -> str:
+    """The regex source for a phrase template, without anchors."""
     parts: list[str] = []
     last = 0
     for m in _SLOT_TOKEN.finditer(phrase):
@@ -156,7 +171,14 @@ def compile_phrase(phrase: str) -> re.Pattern:
         parts.append(f"(?P<{m.group(1)}>.+)")
         last = m.end()
     parts.append(_compile_literal(phrase[last:]))
-    return re.compile(r"^\W*(?:" + "".join(parts) + r")\W*$", re.IGNORECASE)
+    return "".join(parts)
+
+
+def compile_phrase(phrase: str) -> re.Pattern:
+    """Compile a phrase template like "commit with message {message}" into a
+    case-insensitive regex. {slot} captures free text; literal words match
+    singular or plural, and leading/trailing punctuation is ignored."""
+    return re.compile(r"^\W*(?:" + _phrase_inner(phrase) + r")\W*$", re.IGNORECASE)
 
 
 def _fill_template(template: str, groups: dict[str, str]) -> str:
@@ -198,28 +220,92 @@ def _register_table() -> None:
             return _fill_template(_template, m.groupdict())
 
         _BUILTINS.append((pattern, builder, confidence))
+        _SEARCHABLE.append(
+            (re.compile(_phrase_inner(phrase), re.IGNORECASE), builder, confidence)
+        )
 
 
 _register_table()
 
 
+# Conversational lead-ins and trailing fillers people naturally say
+# ("I want to run the tests", "git status please"). Stripped before
+# matching so the intent underneath is what gets mapped.
+_LEAD_FILLERS = (
+    r"i want to",
+    r"i'd like to",
+    r"i would like to",
+    r"can you",
+    r"could you",
+    r"would you",
+    r"will you",
+    r"please",
+    r"hey",
+    r"okay",
+    r"ok",
+    r"so",
+    r"um+",
+    r"uh+",
+    r"let's",
+    r"lets",
+    r"now",
+    r"just",
+)
+# Note: temporal words like "now" are only stripped as lead-ins. At the
+# end they often belong to the message ("ship it now"), so trailing
+# fillers are limited to unambiguous politeness.
+_TRAIL_FILLERS = (r"please", r"thanks", r"thank you")
+
+# Words that negate the intent ("don't run the tests") — the search
+# fallback must not map those.
+_NEGATION = re.compile(r"\b(don'?t|do not|never|stop|cancel)\b", re.IGNORECASE)
+
+
+def _strip_fillers(text: str) -> str:
+    """Remove conversational lead-ins and trailing politeness."""
+    prev = None
+    while prev != text:
+        prev = text
+        for pat in _LEAD_FILLERS:
+            text = re.sub(
+                r"^(?:" + pat + r")\b[\s,]*", "", text, flags=re.IGNORECASE
+            ).strip()
+        for pat in _TRAIL_FILLERS:
+            text = re.sub(
+                r"[\s,]*\b(?:" + pat + r")$", "", text, flags=re.IGNORECASE
+            ).strip()
+    return text
+
+
 def map_intent(text: str, aliases: dict[str, str] | None = None) -> Match | None:
     """Map transcribed text to a shell command. Returns None when unsure.
 
-    Matching tolerates singular/plural differences ("test" vs "tests")
-    and letter case; captured slots keep their original text.
+    Matching tolerates conversational phrasing ("I want to...", "please"),
+    singular/plural differences, and letter case; it can also find the
+    intent inside a longer sentence. Captured slots keep their original
+    text. Negated requests ("don't run the tests") never map.
     """
-    text = " ".join(text.split())  # collapse whitespace
+    text = _strip_fillers(" ".join(text.split()))  # collapse whitespace
     if not text:
         return None
 
-    # 1. Built-in intents first.
+    # 1. Built-in intents, anchored.
     for pattern, builder, confidence in _BUILTINS:
         m = pattern.match(text)
         if m:
             return Match(command=builder(m), confidence=confidence, source="builtin")
 
-    # 2. User aliases, fuzzy matched. Threshold keeps wild guesses out.
+    # 2. Built-in intents found inside a longer sentence.
+    for pattern, builder, confidence in _SEARCHABLE:
+        m = pattern.search(text)
+        if m and not _NEGATION.search(text[: m.start()]):
+            return Match(
+                command=builder(m),
+                confidence=confidence * 0.95,
+                source="builtin",
+            )
+
+    # 3. User aliases, fuzzy matched. Threshold keeps wild guesses out.
     best: Match | None = None
     for phrase, command in (aliases or {}).items():
         score = _fuzzy_score(text, phrase)

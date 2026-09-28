@@ -85,10 +85,12 @@ More tips:
   languages), or `language: "auto"` to detect it per recording.
 - The `HF_TOKEN` warning on first run is harmless. It only affects model
   download rate limits; transcription itself is fully local.
-- Matching is forgiving about singular/plural ("test" vs "tests") and
-  letter case, and filenames, hostnames, and commit messages keep their
-  original text. If nothing matches, talksh suggests the closest known
-  phrases instead of guessing.
+- Matching understands natural phrasing: "I want to run the tests", "can you
+  please commit with message fix bug", "git status please" all work. It is
+  forgiving about singular/plural ("test" vs "tests") and letter case, and
+  filenames, hostnames, and commit messages keep their original text. If
+  nothing matches, talksh suggests the closest known phrases instead of
+  guessing. Negated requests ("don't run the tests") never map.
 
 ## LLM command generation (optional)
 

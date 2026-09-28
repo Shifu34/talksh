@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+.venvs/
+
+# Demo artifacts
+*.mp4
+*.mov
+
+# Local config with secrets (may contain an LLM API key)
+.talksh.yaml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
